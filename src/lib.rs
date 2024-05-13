@@ -11,6 +11,21 @@
 
 use proc_macro::TokenStream;
 
+/// Expands to a `f16` value with given hexadecimal representation.
+#[cfg(feature = "half")]
+#[proc_macro]
+pub fn hexf16(input: TokenStream) -> TokenStream {
+    let lit = syn::parse_macro_input!(input as syn::LitStr);
+    match hexf_parse::parse_hexf16(&lit.value(), true) {
+        Ok(v) => format!("{:?}f16", v) // should keep the sign even for -0.0
+            .parse()
+            .expect("formatted a f16 literal"),
+        Err(e) => syn::Error::new(lit.span(), format!("hexf16! failed: {}", e))
+            .to_compile_error()
+            .into(),
+    }
+}
+
 /// Expands to a `f32` value with given hexadecimal representation.
 ///
 /// # Example

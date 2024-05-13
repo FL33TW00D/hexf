@@ -11,6 +11,10 @@ readme = "README.md"
 license = "0BSD"
 edition = "2018"
 
+[features]
+default = ["half"]
+half = ["dep:half", "hexf-parse/half"]
+
 [workspace]
 members = ["parse/"]
 
@@ -20,4 +24,5 @@ proc-macro = true
 [dependencies]
 hexf-parse = { version = "0.2.1", path = "parse/" }
 syn = { version = "1.0.41", default-features = false, features = ["parsing", "proc-macro"] }
+half = { version = "2.1.0", optional = true }
 

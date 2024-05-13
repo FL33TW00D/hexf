@@ -17,6 +17,8 @@
 //!
 //! The error is reported via an opaque `ParseHexfError` type.
 
+#[cfg(feature = "half")]
+use half::f16;
 use std::{f32, f64, fmt, isize, str};
 
 /// An opaque error type from `parse_hexf32` and `parse_hexf64`.
@@ -348,8 +350,70 @@ macro_rules! define_convert {
     };
 }
 
+#[cfg(feature = "half")]
+fn convert_hexf16(negative: bool, mantissa: u64, exponent: isize) -> Result<f16, ParseHexfError> {
+    // guard the exponent with the definitely safe range (we will exactly bound it later)
+    if exponent < -0xffff || exponent > 0xffff {
+        return Err(INEXACT);
+    }
+
+    // strip the trailing zeroes in mantissa and adjust exponent.
+    // we do this because a unit in the least significant bit of mantissa is
+    // always safe to represent while one in the most significant bit isn't.
+    let trailing = mantissa.trailing_zeros() & 63; // guard mantissa=0 case
+    let mantissa = mantissa >> trailing;
+    let exponent = exponent + trailing as isize;
+
+    // normalize the exponent that the number is (1.xxxx * 2^normalexp),
+    // and check for the mantissa and exponent ranges
+    let leading = mantissa.leading_zeros();
+    let normalexp = exponent + (63 - leading as isize);
+    let mantissasize = if normalexp < f16::MIN_EXP as isize - f16::MANTISSA_DIGITS as isize {
+        // the number is smaller than the minimal denormal number
+        return Err(INEXACT);
+    } else if normalexp < (f16::MIN_EXP - 1) as isize {
+        // the number is denormal, the # of bits in the mantissa is:
+        // - minimum (1) at MIN_EXP - MANTISSA_DIGITS
+        // - maximum (MANTISSA_DIGITS - 1) at MIN_EXP - 2
+        f16::MANTISSA_DIGITS as isize - f16::MIN_EXP as isize + normalexp + 1
+    } else if normalexp < f16::MAX_EXP as isize {
+        // the number is normal, the # of bits in the mantissa is fixed
+        f16::MANTISSA_DIGITS as isize
+    } else {
+        // the number is larger than the maximal denormal number
+        // ($f::MAX_EXP denotes NaN and infinities here)
+        return Err(INEXACT);
+    };
+
+    if mantissa >> mantissasize == 0 {
+        let mut mantissa = mantissa as f64;
+        if negative {
+            mantissa = -mantissa;
+        }
+        // yes, powi somehow does not work!
+        Ok(f16::from_f64(mantissa * libm::exp2(exponent as f64)))
+    } else {
+        Err(INEXACT)
+    }
+}
+
 define_convert!(convert_hexf32 => f32);
 define_convert!(convert_hexf64 => f64);
+
+#[test]
+#[cfg(feature = "half")]
+fn test_convert_hexf16() {
+    assert_eq!(convert_hexf16(false, 0, 0), Ok(f16::from_f32(0.0)));
+    assert_eq!(convert_hexf16(false, 1, 0), Ok(f16::from_f32(1.0)));
+    assert_eq!(convert_hexf16(false, 10, 0), Ok(f16::from_f32(10.0)));
+    assert_eq!(convert_hexf16(false, 10, 1), Ok(f16::from_f32(20.0)));
+    assert_eq!(convert_hexf16(false, 10, -1), Ok(f16::from_f32(5.0)));
+    assert_eq!(convert_hexf16(true, 0, 0), Ok(f16::from_f32(-0.0)));
+
+    // negative zeroes
+    assert_eq!(convert_hexf16(false, 0, 0).unwrap().to_f32().signum(), 1.0);
+    assert_eq!(convert_hexf16(true, 0, 0).unwrap().to_f32().signum(), -1.0);
+}
 
 #[test]
 fn test_convert_hexf32() {
@@ -509,6 +573,14 @@ fn test_convert_hexf64() {
         convert_hexf64(false, 0xffff_ffff_ffff_fc00, 960),
         Err(INEXACT)
     );
+}
+
+#[cfg(feature = "half")]
+/// Tries to parse a hexadecimal float literal to `f16`.
+/// The underscore is allowed only when `allow_underscore` is true.
+pub fn parse_hexf16(s: &str, allow_underscore: bool) -> Result<f16, ParseHexfError> {
+    let (negative, mantissa, exponent) = parse(s.as_bytes(), allow_underscore)?;
+    convert_hexf16(negative, mantissa, exponent)
 }
 
 /// Tries to parse a hexadecimal float literal to `f32`.

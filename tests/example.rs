@@ -1,11 +1,15 @@
 #![allow(clippy::float_cmp)]
 
 use hexf::{hexf32, hexf64};
+#[cfg(feature = "half")]
+use {half::f16, hexf::hexf16};
 
 use std::f64;
 
 #[test]
 fn basic() {
+    #[cfg(feature = "half")]
+    assert_eq!(hexf16!("0x1.999ap-4"), f16::from_f32(0.1));
     assert_eq!(hexf32!("0x1.99999ap-4"), 0.1f32);
     assert_eq!(hexf64!("0x1.999999999999ap-4"), 0.1f64);
     assert_eq!(hexf64!("0x1.999999999998ap-4"), 0.1f64 - f64::EPSILON);
